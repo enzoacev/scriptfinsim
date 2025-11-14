@@ -124,7 +124,7 @@ ElegirTarjetaGUI(BancoElegido, ArrayTarjetas) {
     }
 }
 
-; --- FUNCIÓN 5 (GLOBAL): cambia TODAS las apariciones de GROUP= y CARD= en el archivo ---
+; --- FUNCIÓN 5: cambia TODAS las apariciones de GROUP= y CARD= en el archivo ---
 ModificarArchivoIni(Grupo, Tarjeta) {
     rutaArchivo := FileSelect(, , "Selecciona el archivo .ini a modificar", "Archivos INI (*.ini)")
     if (rutaArchivo = "")
@@ -199,7 +199,55 @@ ModificarArchivoIni(Grupo, Tarjeta) {
             . "`nCARD  = " Tarjeta "  (reemplazos: " totalCard ")"
         , "OK")
 
+        ; === NUEVO: luego de modificar el archivo, cargarlo y darle Play en el simulador ===
+        CargarYReproducirScript()
+
     } catch as e {
         MsgBox("No se pudo modificar el archivo." . "`nDetalle: " e.Message, "Error")
+    }
+}
+
+; --- FUNCIÓN 6: va al simulador, Scripts -> Playback Script From -> This machine... y da Play ---
+CargarYReproducirScript() {
+    global TituloVentana
+
+    ; Aseguramos foco en el ATM Simulator
+    WinActivate(TituloVentana)
+    if !WinWaitActive(TituloVentana, , 2) {
+        MsgBox("No se pudo activar la ventana del ATM Simulator para cargar el script.", "Error")
+        return
+    }
+
+    ; 1) Abrir menú Scripts (ALT + S)
+    Send("!s")
+    Sleep(250)
+
+    ; 2) Elegir 'Playback Script From' (letra aceleradora S de Script)
+    Send("s")
+    Sleep(250)
+
+    ; 3) En el submenú elegir 'This machine...' (letra aceleradora T)
+    Send("t")
+
+    ; Ahora se abre el Explorador para que vos elijas el archivo
+    MsgBox(
+        "Se abrió la ventana del Explorador para seleccionar el script." 
+        . "`nSeleccioná el archivo correspondiente y presioná Aceptar." 
+        . "`n`nCuando la ventana se cierre y vuelvas al simulador, presioná OK para continuar y darle Play.",
+        "Seleccionar script"
+    )
+
+    ; 4) Volver al ATM Simulator y dar Play en 'Play Back A Local Script File'
+    WinActivate(TituloVentana)
+    if !WinWaitActive(TituloVentana, , 3) {
+        MsgBox("No se pudo volver al ATM Simulator después de seleccionar el archivo.", "Error")
+        return
+    }
+
+    ; 5) Hacer clic en el botón Play (Button12)
+    try {
+        ControlClick("Button12", TituloVentana)
+    } catch as e {
+        MsgBox("No se pudo hacer clic en el botón Play (Button12)." . "`nDetalle: " e.Message, "Error")
     }
 }
