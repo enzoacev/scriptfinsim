@@ -4,19 +4,81 @@
 #Warn
 
 ; --- CONFIGURACIÓN ---
-; ¡ASEGÚRATE DE QUE ESTOS 3 VALORES SEAN EXACTOS!
 SetTitleMatchMode 1   ; 1 = el título EMPIEZA con el texto dado
 Global TituloVentana := "ATM Simulator"
 Global DesplegableBanco_ClassNN := "ComboBox1"
 Global ListaTarjetas_ClassNN   := "ListBox1"
-Global RutaIniSeleccionado := ""   ; acá guardamos la ruta del .ini elegido
+Global RutaIniSeleccionado := ""   ; ruta del .ini que vamos a usar
 
 ; --- Atajo de teclado para iniciar: Presiona Ctrl + Alt + T ---
 ^!t::{
+    SeleccionarArchivoYFlujo()
+}
+
+; --- PASO 0: SELECCIONAR ARCHIVO, LEER GROUP/CARD Y PREGUNTAR QUÉ HACER ---
+SeleccionarArchivoYFlujo() {
+    global RutaIniSeleccionado
+
+    rutaArchivo := FileSelect(, , "Selecciona el archivo .ini a usar", "Archivos INI (*.ini)")
+    if (rutaArchivo = "")
+        return  ; usuario canceló
+
+    RutaIniSeleccionado := rutaArchivo
+
+    ; Leer archivo para mostrar GROUP y CARD actuales
+    try {
+        contenido := FileRead(rutaArchivo)
+    } catch as e {
+        MsgBox("No se pudo leer el archivo seleccionado." . "`nDetalle: " e.Message, "Error")
+        return
+    }
+
+    if (contenido = "") {
+        MsgBox("El archivo seleccionado está vacío.", "Aviso")
+        ; igual podemos seguir y cargarlo/ejecutarlo si querés
+    }
+
+    ; Buscar primeros valores de GROUP= y CARD=
+    groupVal := ""
+    cardVal  := ""
+
+    delim := InStr(contenido, "`r`n") ? "`r`n" : "`n"
+    lines := StrSplit(contenido, delim)
+
+    for _, l in lines {
+        if (groupVal = "") {
+            if RegExMatch(l, "i)^\s*GROUP\s*=\s*(.*)$", &m) {
+                groupVal := m[1]
+            }
+        }
+        if (cardVal = "") {
+            if RegExMatch(l, "i)^\s*CARD\s*=\s*(.*)$", &n) {
+                cardVal := n[1]
+            }
+        }
+        if (groupVal != "" && cardVal != "")
+            break
+    }
+
+    texto := "Archivo seleccionado:" . "`n" rutaArchivo . "`n`n"
+    texto .= "GROUP actual: " . (groupVal != "" ? groupVal : "(no encontrado)") . "`n"
+    texto .= "CARD  actual: " . (cardVal  != "" ? cardVal  : "(no encontrado)") . "`n`n"
+    texto .= "¿Deseás CAMBIAR estos valores según el banco y la tarjeta que selecciones?" . "`n"
+    texto .= "(Si eliges 'No', se usará el archivo tal como está y se irá directo a reproducir el script.)"
+
+    resp := MsgBox(texto, "Confirmar acción", "YesNo")
+
+    if (resp = "No") {
+        ; No modificamos el archivo, solo lo cargamos y damos Play
+        CargarYReproducirScript()
+        return
+    }
+
+    ; Si respondió Sí, seguimos con el flujo normal de cambio
     IniciarProceso()
 }
 
-; --- FUNCIÓN 1: INICIA TODO EL PROCESO ---
+; --- FUNCIÓN 1: INICIA EL PROCESO DE CAMBIO (BANCO/TARJETA) ---
 IniciarProceso() {
     global TituloVentana, DesplegableBanco_ClassNN
     if !WinExist(TituloVentana) {
@@ -39,7 +101,7 @@ IniciarProceso() {
     ElegirBancoGUI(ArrayBancos)
 }
 
-; --- FUNCIÓN 2: MUESTRA LA GUI PARA ELEGIR UN BANCO ---
+; --- FUNCIÓN 2: GUI PARA ELEGIR UN BANCO ---
 ElegirBancoGUI(ArrayBancos) {
     BancoGui := Gui()
     BancoGui.Title := "Paso 1: Selecciona un Banco"
@@ -49,7 +111,6 @@ ElegirBancoGUI(ArrayBancos) {
     LV_Bancos := BancoGui.Add("ListView", "r15 w400 Sort", ["Bancos Disponibles"])
     LV_Bancos.OnEvent("DoubleClick", BancoSeleccionado)
 
-    ; Cargar bancos (limpiando espacios extremos)
     for _, banco in ArrayBancos {
         LV_Bancos.Add("", Trim(banco))
     }
@@ -98,7 +159,7 @@ ContinuarConBanco(BancoElegido) {
     ElegirTarjetaGUI(BancoElegido, ArrayTarjetas)
 }
 
-; --- FUNCIÓN 4: MUESTRA LA GUI PARA ELEGIR UNA TARJETA Y MODIFICA EL INI ---
+; --- FUNCIÓN 4: GUI PARA ELEGIR TARJETA Y MODIFICAR EL INI ---
 ElegirTarjetaGUI(BancoElegido, ArrayTarjetas) {
     TarjetaGui := Gui()
     TarjetaGui.Title := "Paso 2: Selecciona una Tarjeta"
@@ -125,16 +186,15 @@ ElegirTarjetaGUI(BancoElegido, ArrayTarjetas) {
     }
 }
 
-; --- FUNCIÓN 5: cambia TODAS las apariciones de GROUP= y CARD= en el archivo ---
+; --- FUNCIÓN 5: MODIFICA GROUP= Y CARD= EN EL ARCHIVO SELECCIONADO ---
 ModificarArchivoIni(Grupo, Tarjeta) {
     global RutaIniSeleccionado
 
-    rutaArchivo := FileSelect(, , "Selecciona el archivo .ini a modificar", "Archivos INI (*.ini)")
-    if (rutaArchivo = "")
+    rutaArchivo := RutaIniSeleccionado
+    if (rutaArchivo = "") {
+        MsgBox("No hay archivo .ini seleccionado en RutaIniSeleccionado.", "Error")
         return
-
-    ; guardamos la ruta seleccionada para reutilizarla en el diálogo de 'This machine...'
-    RutaIniSeleccionado := rutaArchivo
+    }
 
     try {
         original := FileRead(rutaArchivo)
@@ -149,7 +209,6 @@ ModificarArchivoIni(Grupo, Tarjeta) {
 
         totalGroup := 0, totalCard := 0
 
-        ; Reemplaza en TODAS las líneas (evita tocar comentarios porque no matchean ^\s*KEY=)
         for i, l in lines {
             ; GROUP=
             cG := 0
@@ -178,33 +237,33 @@ ModificarArchivoIni(Grupo, Tarjeta) {
 
         if (!totalGroup && !totalCard) {
             MsgBox("No se encontraron claves 'GROUP=' ni 'CARD=' en el archivo. No se hicieron cambios.", "Sin cambios")
-            return
-        }
-
-        ; Reconstruir exactamente con el mismo separador y salto final si lo tenía
-        out := ""
-        for i, l in lines {
-            if (i > 1)
+            ; igual podemos seguir y reproducir el script
+        } else {
+            ; Reconstruir exactamente con el mismo separador y salto final si lo tenía
+            out := ""
+            for i, l in lines {
+                if (i > 1)
+                    out .= delim
+                out .= l
+            }
+            if (trailing)
                 out .= delim
-            out .= l
+
+            ; Backup y escritura sin BOM
+            FileCopy(rutaArchivo, rutaArchivo ".bak", true)
+            f := FileOpen(rutaArchivo, "w", "UTF-8-RAW")
+            if (!f)
+                throw Error("No se pudo abrir el archivo para escritura.")
+            f.Write(out), f.Close()
+
+            MsgBox(
+                "Hecho: se actualizaron las apariciones." 
+                . "`nGROUP = " Grupo "  (reemplazos: " totalGroup ")"
+                . "`nCARD  = " Tarjeta "  (reemplazos: " totalCard ")"
+            , "OK")
         }
-        if (trailing)
-            out .= delim
 
-        ; Backup y escritura sin BOM
-        FileCopy(rutaArchivo, rutaArchivo ".bak", true)
-        f := FileOpen(rutaArchivo, "w", "UTF-8-RAW")
-        if (!f)
-            throw Error("No se pudo abrir el archivo para escritura.")
-        f.Write(out), f.Close()
-
-        MsgBox(
-            "Hecho: se actualizaron todas las apariciones." 
-            . "`nGROUP = " Grupo "  (reemplazos: " totalGroup ")"
-            . "`nCARD  = " Tarjeta "  (reemplazos: " totalCard ")"
-        , "OK")
-
-        ; Después de modificar el archivo, lo cargamos en el simulador y damos Play
+        ; Después de modificar (o no), cargamos el script y damos Play
         CargarYReproducirScript()
 
     } catch as e {
@@ -212,7 +271,7 @@ ModificarArchivoIni(Grupo, Tarjeta) {
     }
 }
 
-; --- FUNCIÓN 6: Scripts -> Playback Script From -> This machine... -> abrir el .ini -> Play ---
+; --- FUNCIÓN 6: SCRIPTS -> PLAYBACK SCRIPT FROM -> THIS MACHINE... -> ABRIR EL .INI -> PLAY ---
 CargarYReproducirScript() {
     global TituloVentana, RutaIniSeleccionado
 
@@ -264,18 +323,27 @@ CargarYReproducirScript() {
         return
     }
 
-    ; 6) Esperar la ventana "Play Back A Local Script File" y darle Play
-    ;    (es la ventana que aparece en tu captura)
-    if !WinWaitActive("Play Back A Local Script File", , 3) {
+    ; 6) Esperar la ventana "Play Back A Local Script File"
+    playWin := "Play Back A Local Script File"
+    if !WinWait(playWin, , 5) {
         MsgBox("No se encontró la ventana 'Play Back A Local Script File' para ejecutar el script.", "Error")
         return
     }
+    WinActivate(playWin)
+    WinWaitActive(playWin, , 2)
 
+    ; 7) Intentar disparar el botón Play de varias formas
     try {
-        ; Play es el Button12 en esa ventana (según tu Window Spy)
-        ControlClick("Button12", "Play Back A Local Script File")
+        ; a) Foco en Button12 y SPACE
+        ControlFocus("Button12", playWin)
+        Sleep(150)
+        Send("{Space}")
+        Sleep(300)
+
+        ; b) Fallback: ALT+P (si el botón Play tiene P subrayada)
+        ;   Esto no rompe nada si ya se ejecutó con SPACE.
+        Send("!p")
     } catch as e {
-        MsgBox("No se pudo hacer clic en el botón Play (Button12)." . "`nDetalle: " e.Message, "Error")
+        MsgBox("No se pudo activar el botón Play." . "`nDetalle: " e.Message, "Error")
     }
 }
-
