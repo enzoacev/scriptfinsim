@@ -9,6 +9,7 @@ SetTitleMatchMode 1   ; 1 = el título EMPIEZA con el texto dado
 Global TituloVentana := "ATM Simulator"
 Global DesplegableBanco_ClassNN := "ComboBox1"
 Global ListaTarjetas_ClassNN   := "ListBox1"
+Global RutaIniSeleccionado := ""   ; acá guardamos la ruta del .ini elegido
 
 ; --- Atajo de teclado para iniciar: Presiona Ctrl + Alt + T ---
 ^!t::{
@@ -126,9 +127,14 @@ ElegirTarjetaGUI(BancoElegido, ArrayTarjetas) {
 
 ; --- FUNCIÓN 5: cambia TODAS las apariciones de GROUP= y CARD= en el archivo ---
 ModificarArchivoIni(Grupo, Tarjeta) {
+    global RutaIniSeleccionado
+
     rutaArchivo := FileSelect(, , "Selecciona el archivo .ini a modificar", "Archivos INI (*.ini)")
     if (rutaArchivo = "")
         return
+
+    ; guardamos la ruta seleccionada para reutilizarla en el diálogo de 'This machine...'
+    RutaIniSeleccionado := rutaArchivo
 
     try {
         original := FileRead(rutaArchivo)
@@ -147,7 +153,6 @@ ModificarArchivoIni(Grupo, Tarjeta) {
         for i, l in lines {
             ; GROUP=
             cG := 0
-            ; Conserva indentación ($1), la clave tal como esté ($2) y espacios antes del '=' ($3)
             l := RegExReplace(
                 l
               , "i)^( *|\t*)(GROUP)(\s*)=.*$"
@@ -199,7 +204,7 @@ ModificarArchivoIni(Grupo, Tarjeta) {
             . "`nCARD  = " Tarjeta "  (reemplazos: " totalCard ")"
         , "OK")
 
-        ; === NUEVO: luego de modificar el archivo, cargarlo y darle Play en el simulador ===
+        ; Después de modificar el archivo, lo cargamos en el simulador y damos Play
         CargarYReproducirScript()
 
     } catch as e {
@@ -207,9 +212,14 @@ ModificarArchivoIni(Grupo, Tarjeta) {
     }
 }
 
-; --- FUNCIÓN 6: va al simulador, Scripts -> Playback Script From -> This machine... y da Play ---
+; --- FUNCIÓN 6: Scripts -> Playback Script From -> This machine... -> abrir el .ini -> Play ---
 CargarYReproducirScript() {
-    global TituloVentana
+    global TituloVentana, RutaIniSeleccionado
+
+    if (RutaIniSeleccionado = "") {
+        MsgBox("No se dispone de la ruta del archivo .ini seleccionado.", "Error")
+        return
+    }
 
     ; Aseguramos foco en el ATM Simulator
     WinActivate(TituloVentana)
@@ -222,32 +232,50 @@ CargarYReproducirScript() {
     Send("!s")
     Sleep(250)
 
-    ; 2) Elegir 'Playback Script From' (letra aceleradora S de Script)
+    ; 2) Elegir 'Playback Script From' (aceleradora: S)
     Send("s")
     Sleep(250)
 
-    ; 3) En el submenú elegir 'This machine...' (letra aceleradora T)
+    ; 3) En el submenú elegir 'This machine...' (aceleradora: T)
     Send("t")
 
-    ; Ahora se abre el Explorador para que vos elijas el archivo
-    MsgBox(
-        "Se abrió la ventana del Explorador para seleccionar el script." 
-        . "`nSeleccioná el archivo correspondiente y presioná Aceptar." 
-        . "`n`nCuando la ventana se cierre y vuelvas al simulador, presioná OK para continuar y darle Play.",
-        "Seleccionar script"
-    )
-
-    ; 4) Volver al ATM Simulator y dar Play en 'Play Back A Local Script File'
-    WinActivate(TituloVentana)
-    if !WinWaitActive(TituloVentana, , 3) {
-        MsgBox("No se pudo volver al ATM Simulator después de seleccionar el archivo.", "Error")
+    ; 4) Esperar el diálogo estándar de selección de archivo (Open/Abrir)
+    if !WinWaitActive("ahk_class #32770", , 3) {
+        MsgBox("No se detectó la ventana de selección de archivo (Open/Abrir).", "Error")
         return
     }
 
-    ; 5) Hacer clic en el botón Play (Button12)
+    ; 5) Pegar la RUTA COMPLETA en Edit1 y confirmar
     try {
-        ControlClick("Button12", TituloVentana)
+        path := RutaIniSeleccionado
+        path := Trim(path, '"')   ; por si viniera con comillas
+
+        ControlFocus("Edit1", "ahk_class #32770")
+        Sleep(150)
+        Send("^a")
+        Sleep(80)
+        Send("{Del}")
+        Sleep(80)
+        SendText(path)
+        Sleep(200)
+        Send("{Enter}")           ; equivalente a hacer clic en 'Abrir'
+    } catch as e {
+        MsgBox("No se pudo completar la selección del archivo en el diálogo." . "`nDetalle: " e.Message, "Error")
+        return
+    }
+
+    ; 6) Esperar la ventana "Play Back A Local Script File" y darle Play
+    ;    (es la ventana que aparece en tu captura)
+    if !WinWaitActive("Play Back A Local Script File", , 3) {
+        MsgBox("No se encontró la ventana 'Play Back A Local Script File' para ejecutar el script.", "Error")
+        return
+    }
+
+    try {
+        ; Play es el Button12 en esa ventana (según tu Window Spy)
+        ControlClick("Button12", "Play Back A Local Script File")
     } catch as e {
         MsgBox("No se pudo hacer clic en el botón Play (Button12)." . "`nDetalle: " e.Message, "Error")
     }
 }
+
